@@ -117,6 +117,8 @@ model Unit {
   monthlyRent    Int          @default(0)
   securityDeposit Int         @default(0)
   status         String       @default("Vacant") // Occupied | Vacant | Maintenance
+  ownerName      String?      // House owner (malik) name — per-unit, differs per house
+  ownerPhone     String?      // House owner (malik) phone
   notes          String?
   isDemo         Boolean      @default(false)
   createdAt      DateTime     @default(now())

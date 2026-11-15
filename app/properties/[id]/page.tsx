@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { formatPKR } from "@/lib/format";
 import { Shell, Card, Badge } from "@/components/ui";
-import { UnitForm, ChargeEditor } from "@/components/forms";
+import { UnitForm, UnitImportForm, ChargeEditor } from "@/components/forms";
 
 export default async function PropertyDetailPage({ params }: PageProps<"/properties/[id]">) {
   const { id } = await params;
@@ -32,6 +32,7 @@ export default async function PropertyDetailPage({ params }: PageProps<"/propert
                     <Badge tone={u.status === "Occupied" ? "green" : "slate"}>{u.status}</Badge>
                   </div>
                   <p className="text-sm text-slate-600">Rent {formatPKR(u.monthlyRent)}/month · Deposit {formatPKR(u.securityDeposit)}</p>
+                  <p className="text-sm text-slate-600">Owner: {u.ownerName ?? "—"}{u.ownerPhone ? ` · ${u.ownerPhone}` : ""}</p>
                   <p className="text-sm text-slate-600">Tenant: {u.tenants[0]?.fullName ?? "— vacant —"}</p>
                   <details className="mt-2">
                     <summary className="cursor-pointer text-sm font-semibold text-teal-700">Unit charges (override property / org)</summary>
@@ -44,6 +45,10 @@ export default async function PropertyDetailPage({ params }: PageProps<"/propert
           <div className="mt-4 border-t border-slate-100 pt-4">
             <h3 className="mb-2 font-semibold">Add a unit</h3>
             <UnitForm propertyId={prop.id} />
+          </div>
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <h3 className="mb-2 font-semibold">Import many houses from Excel</h3>
+            <UnitImportForm propertyId={prop.id} />
           </div>
         </Card>
 

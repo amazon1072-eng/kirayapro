@@ -172,9 +172,91 @@ export function UnitForm({ propertyId }: { propertyId: string }) {
         <Field label="Area (sq ft)"><input name="areaSqft" type="number" min={0} className={inputCls} /></Field>
         <Field label="Monthly rent (Rs.) *"><input name="monthlyRent" type="number" min={0} required className={inputCls} placeholder="60000" /></Field>
         <Field label="Security deposit (Rs.)"><input name="securityDeposit" type="number" min={0} defaultValue={0} className={inputCls} /></Field>
+        <Field label="Owner (malik) name"><input name="ownerName" className={inputCls} placeholder="e.g. Ahmed Khan" /></Field>
+        <Field label="Owner (malik) phone"><input name="ownerPhone" className={inputCls} placeholder="03xx-xxxxxxx" /></Field>
       </div>
       <Field label="Notes"><input name="notes" className={inputCls} /></Field>
       <button disabled={busy} className={btnCls}>Add unit</button>
+    </form>
+  );
+}
+
+type ImportError = { row: number; message: string };
+
+export function UnitImportForm({ propertyId }: { propertyId: string }) {
+  const router = useRouter();
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [rowErrors, setRowErrors] = useState<ImportError[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const file = fd.get("file");
+    if (!file || (file instanceof File && file.size === 0)) {
+      setErr("Please choose an Excel (.xlsx) or CSV file first.");
+      return;
+    }
+    setErr(null); setMsg(null); setRowErrors([]); setBusy(true);
+    try {
+      const res = await fetch("/api/units/import", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Import failed.");
+      if (data.ok === false) {
+        setRowErrors(data.errors ?? []);
+        setErr(`Nothing was added — ${data.errors?.length ?? 0} row(s) have errors. Fix the file and upload again.`);
+        return;
+      }
+      setMsg(`${data.created} house(s) added.`);
+      e.currentTarget.reset();
+      setFileName(null);
+      router.refresh();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Import failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-3">
+      <FormMsg msg={msg} err={err} />
+      <p className="text-sm text-slate-600">
+        Upload an Excel (.xlsx) or CSV list — one house per row, each with its own owner, phone and rent.{" "}
+        <a href="/unit-import-template.csv" download className="font-semibold text-teal-700 underline">Download sample template</a>
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+          Choose file
+          <input
+            name="file"
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => setFileName(e.currentTarget.files?.[0]?.name ?? null)}
+          />
+        </label>
+        <span className="text-sm text-slate-500">{fileName ?? "No file chosen"}</span>
+        <input type="hidden" name="propertyId" value={propertyId} />
+        <button disabled={busy} className={btnCls}>Upload &amp; add houses</button>
+      </div>
+      {rowErrors.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-red-200">
+          <table className="w-full text-sm">
+            <thead><tr className="bg-red-50 text-left"><th className="px-3 py-2">Row</th><th className="px-3 py-2">Problem</th></tr></thead>
+            <tbody>
+              {rowErrors.map((r) => (
+                <tr key={r.row} className="border-t border-red-100">
+                  <td className="px-3 py-2 font-semibold">{r.row}</td>
+                  <td className="px-3 py-2">{r.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </form>
   );
 }

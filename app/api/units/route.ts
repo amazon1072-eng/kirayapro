@@ -28,6 +28,8 @@ export async function POST(req: Request) {
       monthlyRent: rent,
       securityDeposit: Math.max(0, toInt(body.securityDeposit, 0)),
       status: "Vacant",
+      ownerName: String(body.ownerName ?? "").trim() || null,
+      ownerPhone: String(body.ownerPhone ?? "").trim() || null,
       notes: String(body.notes ?? "").trim() || null,
     },
   });
