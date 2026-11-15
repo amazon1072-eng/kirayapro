@@ -1,0 +1,15 @@
+# KirayaPro — never commit secrets or local state.
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+prisma/dev.db
+prisma/dev.db-journal
+backups/
+uploads/
+work/screenshots/
+.DS_Store
+
+# Not needed for the Render deploy (large video/models/venv + local docs).
+work/

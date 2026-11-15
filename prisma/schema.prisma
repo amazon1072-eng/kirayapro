@@ -1,0 +1,491 @@
+// KirayaPro — Phase 1 schema
+// Database: SQLite (local file, no monthly fee, no managed service).
+// To move to self-hosted PostgreSQL later, change provider to
+// "postgresql" and DATABASE_URL to a postgres URL, then re-run migrations.
+// Multi-tenancy: EVERY business record carries organizationId; every
+// query is scoped by it (see lib/auth.ts requireOrg / lib/api.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id               String    @id @default(cuid())
+  name             String
+  managementTypes  String    @default("[]") // JSON array: Residential, Commercial, Housing Society, Portfolio, Market/Union
+  city             String?
+  address          String?
+  contactName      String?
+  contactPhone     String?
+  plan             String    @default("Starter") // Starter | Professional | Business | Enterprise
+  trialEndsAt      DateTime?
+  subscriptionStatus String  @default("trial") // trial | active | past_due | cancelled
+  isDemo           Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  users            User[]
+  properties       Property[]
+  units            Unit[]
+  tenants          Tenant[]
+  chargeConfigs    ChargeConfig[]
+  bills            Bill[]
+  payments         Payment[]
+  maintenance      MaintenanceRequest[]
+  expenses         Expense[]
+  receiptCounter   Int       @default(0)
+  unions           Union[]
+  unionMembers     UnionMember[]
+  unionFees        UnionFee[]
+  unionFeeCollections UnionFeeCollection[]
+  unionExpenses    UnionExpense[]
+  notifications    Notification[]
+  customRoles      CustomRole[]
+  whatsappMessages WhatsAppMessage[]
+  reminderLogs     ReminderLog[]
+
+  @@index([isDemo])
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  fullName       String
+  phone          String?
+  role           String       @default("OWNER") // OWNER | ADMIN | MANAGER | ACCOUNTANT
+  customRoleId   String?
+  customRole     CustomRole?  @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  sessions       Session[]
+  notifications  Notification[]
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model Property {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  type           String // Residential | Commercial | Housing Society | Market/Union | Portfolio
+  address        String?
+  city           String?
+  ownerName      String?
+  floors         Int          @default(1)
+  status         String       @default("Active") // Active | Inactive
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  units          Unit[]
+  chargeConfigs  ChargeConfig[]
+
+  @@index([organizationId])
+  @@index([organizationId, name])
+}
+
+model Unit {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  propertyId     String
+  property       Property     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unitNo         String
+  kind           String // House | Flat | Apartment | Shop | Office | Other
+  floor          Int          @default(0)
+  areaSqft       Int?
+  monthlyRent    Int          @default(0)
+  securityDeposit Int         @default(0)
+  status         String       @default("Vacant") // Occupied | Vacant | Maintenance
+  notes          String?
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  tenants        Tenant[]
+  bills          Bill[]
+  chargeConfigs  ChargeConfig[]
+  unionMembers   UnionMember[]
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([organizationId, propertyId, unitNo])
+}
+
+model Tenant {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fullName       String
+  phone          String
+  cnic           String?
+  address        String?
+  emergencyName  String?
+  emergencyPhone String?
+  unitId         String?
+  unit           Unit?        @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  memberType     String? // Tenant | Shopkeeper | Member (Phase 1: simple field)
+  membershipNo   String?
+  rentalStart    DateTime?
+  rentalEnd      DateTime?
+  status         String       @default("Active") // Active | Inactive | Left
+  notes          String?
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  bills          Bill[]
+  unionMembers   UnionMember[]
+
+  @@index([organizationId])
+  @@index([unitId])
+}
+
+// Flexible billing config — three levels, override priority UNIT > PROPERTY > ORGANIZATION.
+// scope: "ORG" | "PROPERTY" | "UNIT"; scopeId = organizationId / propertyId / unitId.
+// chargeKey: rent | maintenance | electricity | electricity_submeter | water | water_tanker | gas | security | cleaning | generator | parking | other
+model ChargeConfig {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  scope          String // ORG | PROPERTY | UNIT
+  scopeId        String
+  propertyId     String?
+  property       Property?    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unitId         String?
+  unit           Unit?        @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  chargeKey      String
+  label          String
+  enabled        Boolean      @default(true)
+  amount         Int          @default(0) // PKR; 0 = manually entered / meter-based (see method)
+  method         String       @default("fixed") // fixed | meter | actual_bill | one_time | manual
+  frequency      String       @default("monthly") // monthly | one_time
+  effectiveDate  DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, scope, scopeId, chargeKey])
+  @@index([organizationId])
+  @@index([unitId])
+  @@index([propertyId])
+}
+
+// A bill is a SNAPSHOT: line items are frozen in itemsJson at creation.
+// Price/config changes later never change an old bill.
+model Bill {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  unitId         String
+  unit           Unit         @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  tenantId       String?
+  tenant         Tenant?      @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  billingPeriod  String // YYYY-MM
+  itemsJson      String       @default("[]") // [{chargeKey,label,amount,method}]
+  totalAmount    Int          @default(0)
+  status         String       @default("Unpaid") // Unpaid | Partially Paid | Paid
+  dueDate        DateTime?
+  tokenHash      String?      @unique // hashed tenant-portal token
+  tokenExpiresAt DateTime?
+  tokenRevoked   Boolean      @default(false)
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  payments       Payment[]
+
+  @@unique([unitId, billingPeriod])
+  @@index([organizationId])
+  @@index([organizationId, billingPeriod])
+  @@index([tenantId])
+}
+
+// Payment submission from the tenant portal (or recorded by admin).
+// Only status=APPROVED counts as a verified collection.
+// Unique (billId, reference, amount) prevents duplicate ledger entries.
+model Payment {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  billId         String
+  bill           Bill         @relation(fields: [billId], references: [id], onDelete: Cascade)
+  amount         Int
+  method         String // Cash | Bank transfer | Easypaisa | JazzCash | Other
+  reference      String?
+  paidDate       DateTime     @default(now())
+  proofPath      String? // local file under uploads/proofs/
+  proofName      String?
+  status         String       @default("Pending") // Pending | Approved | Rejected
+  rejectReason   String?
+  internalNotes  String?
+  receiptNo      String?      @unique // KP-2026-0001, set on approval
+  verifiedBy     String?
+  verifiedAt     DateTime?
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([billId, reference, amount])
+  @@index([organizationId])
+  @@index([billId])
+  @@index([organizationId, status])
+}
+
+model MaintenanceRequest {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  propertyId     String?
+  unitId         String?
+  title          String
+  category       String // Plumbing | Electrical | Painting | Cleaning | Appliance | Structural | Other
+  priority       String       @default("Medium") // Low | Medium | High | Urgent
+  assignedStaff  String?
+  status         String       @default("Pending") // Pending | Assigned | In Progress | Completed | Rejected
+  description    String?
+  costEstimate   Int?
+  isDemo         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  expenses       Expense[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+}
+
+model Expense {
+  id             String              @id @default(cuid())
+  organizationId String
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  maintenanceId  String?
+  maintenance    MaintenanceRequest? @relation(fields: [maintenanceId], references: [id], onDelete: SetNull)
+  propertyId     String?
+  category       String // Maintenance | Repair | Cleaning | Security | Utility | Other
+  description    String
+  amount         Int
+  vendor         String?
+  invoicePath    String?
+  invoiceName    String?
+  spentDate      DateTime            @default(now())
+  isDemo         Boolean             @default(false)
+  createdAt      DateTime            @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, spentDate])
+}
+
+// ---------- Phase 2 models ----------
+
+// A market/traders union inside an organization. An org may have more
+// than one union; typically one. Union money NEVER touches rent bills.
+model Union {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  presidentName  String?
+  presidentPhone String?
+  address        String?
+  city           String?
+  registrationNo String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  members        UnionMember[]
+  fees           UnionFee[]
+  collections    UnionFeeCollection[]
+  expenses       UnionExpense[]
+
+  @@index([organizationId])
+}
+
+// Union membership is a SEPARATE record from shop ownership and tenancy.
+model UnionMember {
+  id             String   @id @default(cuid())
+  unionId        String
+  union          Union    @relation(fields: [unionId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  membershipNo   String
+  fullName       String
+  phone          String
+  cnic           String?
+  unitId         String?
+  unit           Unit?    @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  tenantId       String?
+  tenant         Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  status         String   @default("Active") // Active | Suspended
+  joinedDate     DateTime @default(now())
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  collections    UnionFeeCollection[]
+
+  @@unique([unionId, membershipNo])
+  @@index([organizationId])
+  @@index([unionId])
+}
+
+// Union fee configuration (e.g. monthly Rs. 2,000 membership fee).
+model UnionFee {
+  id             String   @id @default(cuid())
+  unionId        String
+  union          Union    @relation(fields: [unionId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  label          String
+  amount         Int      // PKR
+  period         String   @default("monthly") // monthly | quarterly | yearly
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([unionId])
+}
+
+// One row per member per billing period. Unique (memberId, billingPeriod)
+// refuses duplicate fee billing.
+model UnionFeeCollection {
+  id             String   @id @default(cuid())
+  unionId        String
+  union          Union    @relation(fields: [unionId], references: [id], onDelete: Cascade)
+  memberId       String
+  member         UnionMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  billingPeriod  String   // YYYY-MM
+  amount         Int
+  status         String   @default("Pending") // Pending | Paid
+  paidDate       DateTime?
+  method         String?
+  reference      String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([memberId, billingPeriod])
+  @@index([organizationId])
+  @@index([unionId, billingPeriod])
+}
+
+// Union expenses are SEPARATE from property Expense rows.
+model UnionExpense {
+  id             String   @id @default(cuid())
+  unionId        String
+  union          Union    @relation(fields: [unionId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category       String
+  description    String
+  amount         Int
+  vendor         String?
+  invoicePath    String?
+  invoiceName    String?
+  spentDate      DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([unionId])
+}
+
+// In-app notifications. dedupKey is unique so the engine never creates
+// the same notification twice. userId null = all org admins/managers.
+model Notification {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  type           String   // rent_reminder | overdue | agreement_expiry | payment_submitted | payment_approved | payment_rejected | maintenance_update
+  title          String
+  body           String
+  link           String?
+  relatedId      String?
+  dedupKey       String   @unique
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([organizationId, isRead])
+}
+
+model CustomRole {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  permissionsJson String  @default("[]") // JSON array of permission keys
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  users          User[]
+
+  @@index([organizationId])
+}
+
+// Audit log of every WhatsApp bill share. provider "manual" = wa.me link
+// opened by the user (free, no API). provider "waba" = WhatsApp Business
+// API (needs owner credentials — see lib/whatsapp.ts).
+model WhatsAppMessage {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  billId         String?
+  tenantId       String?
+  phone          String
+  templateName   String?
+  body           String
+  provider       String   @default("manual") // manual | waba
+  status         String   @default("manual") // manual | queued | sent | delivered | failed | not_configured
+  externalId     String?
+  error          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([billId])
+}
+
+// ---------- Phase 3 models ----------
+
+// Audit log of every "Send Reminder Again" attempt (success or failure).
+// One row per attempt — the 24h cooldown is enforced by looking up the
+// most recent row for the same (type, billId OR tenantId) in the org.
+// channel: manual = wa.me link generated (NOT sent by the server);
+// waba = WhatsApp Business API. status: manual_link | sent | failed.
+model ReminderLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type           String   // rent_due | overdue_bill | agreement_expiry
+  billId         String?
+  tenantId       String
+  tenantName     String
+  phone          String
+  channel        String   // manual | waba
+  status         String   // manual_link | sent | failed
+  reference      String   // bill period YYYY-MM, or agreement end date
+  sentBy         String   // user id
+  sentByName     String
+  override       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, type, billId])
+  @@index([organizationId, tenantId])
+}
