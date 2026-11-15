@@ -130,7 +130,7 @@ model Unit {
 
   @@index([organizationId])
   @@index([propertyId])
-  @@index([organizationId, propertyId, unitNo])
+  @@unique([organizationId, propertyId, unitNo]) // B-1: one unit number per property (DB guard; API also checks case-insensitively)
 }
 
 model Tenant {

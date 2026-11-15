@@ -43,7 +43,7 @@ export async function GET(_req: Request, ctx: RouteContext<"/api/portal/[token]"
 // POST /api/portal/[token] — tenant submits a payment + proof (multipart).
 export async function POST(req: Request, ctx: RouteContext<"/api/portal/[token]">) {
   const { token } = await ctx.params;
-  const bill = await prisma.bill.findUnique({ where: { tokenHash: hashToken(token) } });
+  const bill = await prisma.bill.findUnique({ where: { tokenHash: hashToken(token) }, include: { payments: true } });
   if (!bill || bill.tokenRevoked || (bill.tokenExpiresAt && bill.tokenExpiresAt <= new Date())) {
     return error("This payment link is invalid, expired or revoked.", 404);
   }
@@ -54,6 +54,13 @@ export async function POST(req: Request, ctx: RouteContext<"/api/portal/[token]"
   if (amount <= 0) return error("Please enter the amount you paid.");
   if (!method) return error("Please choose a payment method.");
   if (!reference) return error("Please enter the transaction reference.");
+  // B-3 fix: refuse payments on a fully-paid bill, and refuse any amount
+  // above the remaining balance (approved payments only — same definition
+  // the portal shows as "remaining").
+  const approvedPaid = bill.payments.filter((p) => p.status === "Approved").reduce((s, p) => s + p.amount, 0);
+  const remaining = Math.max(0, bill.totalAmount - approvedPaid);
+  if (bill.status === "Paid" || remaining <= 0) return error("This bill is already fully paid.", 409);
+  if (amount > remaining) return error(`Amount exceeds the remaining balance of Rs. ${remaining.toLocaleString("en-PK")}.`, 409);
   // Duplicate guard: same bill + reference + amount already submitted.
   const dup = await prisma.payment.findUnique({
     where: { billId_reference_amount: { billId: bill.id, reference, amount } },

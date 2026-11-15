@@ -15,6 +15,9 @@ export async function POST(req: Request) {
   if (unitId) {
     const unit = await prisma.unit.findFirst({ where: { id: unitId, organizationId: user.organizationId } });
     if (!unit) return error("Unit not found.", 404);
+    // B-2 fix: one ACTIVE tenant per unit — a second active tenant is refused.
+    const existing = await prisma.tenant.findFirst({ where: { unitId, organizationId: user.organizationId, status: "Active" } });
+    if (existing) return error(`This unit already has an active tenant (${existing.fullName}).`, 409);
   }
   const tenant = await prisma.$transaction(async (tx) => {
     const t = await tx.tenant.create({

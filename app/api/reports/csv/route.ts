@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/api";
+import { periodsInRange } from "@/lib/format";
 
 // GET /api/reports/csv?from=YYYY-MM-DD&to=YYYY-MM-DD
 // CSV export of bills + approved payments + expenses, org-scoped.
@@ -11,10 +12,12 @@ export async function GET(req: Request) {
   const to = url.searchParams.get("to");
   const fromDate = from ? new Date(`${from}T00:00:00`) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const toDate = to ? new Date(`${to}T23:59:59`) : new Date();
+  // B-4 fix: same as the reports page — bills by billingPeriod, not createdAt.
+  const periods = periodsInRange(fromDate, toDate);
   const bills = await prisma.bill.findMany({
-    where: { organizationId: user.organizationId, createdAt: { gte: fromDate, lte: toDate }, status: { not: "Cancelled" } },
+    where: { organizationId: user.organizationId, billingPeriod: { in: periods }, status: { not: "Cancelled" } },
     include: { unit: { include: { property: true } }, tenant: true, payments: { where: { status: "Approved" } } },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ billingPeriod: "desc" }, { createdAt: "desc" }],
   });
   const expenses = await prisma.expense.findMany({
     where: { organizationId: user.organizationId, spentDate: { gte: fromDate, lte: toDate } },

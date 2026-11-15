@@ -15,6 +15,14 @@ export async function POST(req: Request) {
   if (!propertyId || !unitNo) return error("Property and unit number are required.");
   const prop = await prisma.property.findFirst({ where: { id: propertyId, organizationId: user.organizationId } });
   if (!prop) return error("Property not found.", 404);
+  // B-1 fix: same unit number twice in one property is refused (case-insensitive).
+  const existingNos = await prisma.unit.findMany({
+    where: { propertyId, organizationId: user.organizationId },
+    select: { unitNo: true },
+  });
+  if (existingNos.some((u) => u.unitNo.trim().toLowerCase() === unitNo.toLowerCase())) {
+    return error(`Unit number '${unitNo}' already exists in this property.`, 409);
+  }
   const rent = toInt(body.monthlyRent, -1);
   if (rent < 0) return error("Monthly rent is required.");
   const unit = await prisma.unit.create({

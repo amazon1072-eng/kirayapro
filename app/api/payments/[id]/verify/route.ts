@@ -37,6 +37,18 @@ export async function POST(req: Request, ctx: RouteContext<"/api/payments/[id]/v
     return json({ ok: true, message: "Payment rejected." });
   }
 
+  // B-3 fix (verify side): approving a payment that would push the approved
+  // total above the bill total is refused — closes the overpayment hole when
+  // two pending payments exist for the same bill.
+  const approvedSoFar = await prisma.payment.aggregate({
+    where: { billId: payment.billId, status: "Approved" },
+    _sum: { amount: true },
+  });
+  const paidSoFar = approvedSoFar._sum.amount ?? 0;
+  if (paidSoFar + payment.amount > payment.bill.totalAmount) {
+    return error(`Approving this would overpay the bill (remaining Rs. ${Math.max(0, payment.bill.totalAmount - paidSoFar).toLocaleString("en-PK")}).`, 409);
+  }
+
   // Approve inside a transaction. Receipt numbers are GLOBALLY unique
   // (receiptNo has a unique constraint), so the sequence is derived from
   // the MAXIMUM existing receipt number — NOT a count (a count collides

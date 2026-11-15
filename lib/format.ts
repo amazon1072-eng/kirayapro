@@ -37,3 +37,17 @@ export function periodLabel(period: string): string {
   if (!y || !m) return period;
   return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
 }
+
+/** Billing periods (YYYY-MM) overlapping a date range, inclusive.
+ * B-4 fix: bills are matched by billingPeriod, not by when they were created,
+ * so a bill generated late still lands in its own month's report. */
+export function periodsInRange(from: Date, to: Date): string[] {
+  const periods: string[] = [];
+  const d = new Date(from.getFullYear(), from.getMonth(), 1);
+  const end = new Date(to.getFullYear(), to.getMonth(), 1);
+  while (d <= end) {
+    periods.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    d.setMonth(d.getMonth() + 1);
+  }
+  return periods;
+}

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
-import { formatPKR, formatDate, periodLabel } from "@/lib/format";
+import { formatPKR, formatDate, periodLabel, periodsInRange } from "@/lib/format";
 import { Shell, Card, statusBadge, StatCard } from "@/components/ui";
 import { PrintButton } from "@/components/forms";
 
@@ -13,11 +13,15 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
   const fromDate = new Date(`${from}T00:00:00`);
   const toDate = new Date(`${to}T23:59:59`);
 
+  // B-4 fix: bills are matched by billingPeriod (the month they belong to),
+  // not by createdAt (when they were generated) — a late-generated bill
+  // lands in its own month's report. Expenses still use their real date.
+  const periods = periodsInRange(fromDate, toDate);
   const [bills, expenses, properties] = await Promise.all([
     prisma.bill.findMany({
-      where: { organizationId: user.organizationId, createdAt: { gte: fromDate, lte: toDate }, status: { not: "Cancelled" } },
+      where: { organizationId: user.organizationId, billingPeriod: { in: periods }, status: { not: "Cancelled" } },
       include: { unit: { include: { property: true } }, tenant: true, payments: { where: { status: "Approved" } } },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ billingPeriod: "desc" }, { createdAt: "desc" }],
     }),
     prisma.expense.findMany({ where: { organizationId: user.organizationId, spentDate: { gte: fromDate, lte: toDate } }, orderBy: { spentDate: "desc" } }),
     prisma.property.findMany({ where: { organizationId: user.organizationId }, include: { units: true } }),
@@ -47,7 +51,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/reports"
   return (
     <Shell>
       <h1 className="mb-1 text-2xl font-extrabold">Reports</h1>
-      <p className="mb-5 text-sm text-slate-500">Collection, outstanding, occupancy, rent vs maintenance, expenses and net income — for the selected dates.</p>
+      <p className="mb-5 text-sm text-slate-500">Collection, outstanding, occupancy, rent vs maintenance, expenses and net income — bills by billing month, expenses by date.</p>
       <form method="get" className="no-print mb-5 flex flex-wrap items-end gap-3 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
         <label className="block"><span className="mb-1 block text-xs font-semibold uppercase text-slate-500">From</span>
           <input type="date" name="from" defaultValue={from} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" /></label>
